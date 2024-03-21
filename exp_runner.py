@@ -101,7 +101,8 @@ class Runner:
         res_step = self.end_iter - self.iter_step
         image_perm = self.get_image_perm()
 
-        for iter_i in tqdm(range(res_step)):
+        pbar = tqdm(range(res_step), desc='Training Progress')
+        for iter_i in pbar:
             data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
 
             rays_o, rays_d, true_rgb, mask = data[:, :3], data[:, 3: 6], data[:, 6: 9], data[:, 9: 10]
@@ -132,6 +133,7 @@ class Runner:
             color_error = (color_fine - true_rgb) * mask
             color_fine_loss = F.l1_loss(color_error, torch.zeros_like(color_error), reduction='sum') / mask_sum
             psnr = 20.0 * torch.log10(1.0 / (((color_fine - true_rgb)**2 * mask).sum() / (mask_sum * 3.0)).sqrt())
+            pbar.set_description(f'PSNR: {psnr}')
 
             eikonal_loss = gradient_error
 
@@ -157,7 +159,7 @@ class Runner:
 
             if self.iter_step % self.report_freq == 0:
                 print(self.base_exp_dir)
-                print('iter:{:8>d} loss = {} lr={}'.format(self.iter_step, loss, self.optimizer.param_groups[0]['lr']))
+                print('iter:{:8>d} loss = {} lr={} psnr={}'.format(self.iter_step, loss, self.optimizer.param_groups[0]['lr'], psnr))
 
             if self.iter_step % self.save_freq == 0:
                 self.save_checkpoint()

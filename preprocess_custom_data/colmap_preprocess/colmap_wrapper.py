@@ -1,6 +1,8 @@
 import os
 import subprocess
 
+import pycolmap
+
 
 
 # $ DATASET_PATH=/path/to/dataset
@@ -20,6 +22,37 @@ import subprocess
 #     --output_path $DATASET_PATH/sparse
 
 # $ mkdir $DATASET_PATH/dense
+
+def run_pycolmap(basedir, match_type):
+    logfile_name = os.path.join(basedir, 'colmap_output.txt')
+    # logfile = open(logfile_name, 'w')
+    db_path = os.path.join(basedir, 'database.db')
+    image_path = os.path.join(basedir, 'images')
+
+    feature_extractor_args = pycolmap.extract_features(db_path, image_path)
+    # feat_output = ( subprocess.check_output(feature_extractor_args, universal_newlines=True) )
+    # logfile.write(feat_output)
+    print('Features extracted')
+
+    exhaustive_matcher_args = pycolmap.match_exhaustive(db_path)
+    # match_output = ( subprocess.check_output(exhaustive_matcher_args, universal_newlines=True) )
+    # logfile.write(match_output)
+    print('Features matched')
+
+    p = os.path.join(basedir, 'sparse')
+    if not os.path.exists(p):
+        os.makedirs(p)
+    maps = pycolmap.incremental_mapping(db_path, image_path, p)
+    # map_output = ( subprocess.check_output(maps, universal_newlines=True) )
+
+    maps[0].write(p)
+    # logfile.write(map_output)
+    # logfile.close()
+    print('Sparse map created')
+    
+    print( 'Finished running COLMAP' )
+
+
 def run_colmap(basedir, match_type):
     
     logfile_name = os.path.join(basedir, 'colmap_output.txt')

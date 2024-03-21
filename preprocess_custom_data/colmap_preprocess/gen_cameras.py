@@ -8,7 +8,8 @@ from glob import glob
 
 if __name__ == '__main__':
     work_dir = sys.argv[1]
-    poses_hwf = np.load(os.path.join(work_dir, 'poses.npy')) # n_images, 3, 5
+    poses_hwf = np.load(os.path.join(work_dir, 'poses.npy')) # n_images, 17, where last 2 are near,far
+    poses_hwf = poses_hwf[:,:-2].reshape((poses_hwf.shape[0], 3,5)) # n_images, 3, 5
     poses_raw = poses_hwf[:, :, :4]
     hwf = poses_hwf[:, :, 4]
     pose = np.diag([1.0, 1.0, 1.0, 1.0])

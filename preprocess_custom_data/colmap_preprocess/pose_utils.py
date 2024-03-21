@@ -5,7 +5,7 @@ import imageio
 import skimage.transform
 import trimesh
 
-from colmap_wrapper import run_colmap
+from colmap_wrapper import run_colmap, run_pycolmap
 import colmap_read_model as read_model
 
 
@@ -30,6 +30,7 @@ def load_colmap_data(realdir):
     bottom = np.array([0,0,0,1.]).reshape([1,4])
     
     names = [imdata[k].name for k in imdata]
+    pose_idxs = [k for k in imdata]
     print( 'Images #', len(names))
     perm = np.argsort(names)
     for k in imdata:
@@ -51,29 +52,23 @@ def load_colmap_data(realdir):
     # must switch to [-u, r, -t] from [r, -u, t], NOT [r, u, -t]
     poses = np.concatenate([poses[:, 1:2, :], poses[:, 0:1, :], -poses[:, 2:3, :], poses[:, 3:4, :], poses[:, 4:5, :]], 1)
     
-    return poses, pts3d, perm
+    return poses, pts3d, perm, pose_idxs
 
 
-def save_poses(basedir, poses, pts3d, perm):
+def save_poses(basedir, poses, pts3d, perm, pose_idxs):
     pts_arr = []
-    vis_arr = []
     for k in pts3d:
         pts_arr.append(pts3d[k].xyz)
-        cams = [0] * poses.shape[-1]
         for ind in pts3d[k].image_ids:
-            if len(cams) < ind - 1:
+            if ind not in pose_idxs:
                 print('ERROR: the correct camera poses for current points cannot be accessed')
                 return
-            cams[ind-1] = 1
-        vis_arr.append(cams)
 
     pts = np.stack(pts_arr, axis=0)
     pcd = trimesh.PointCloud(pts)
     pcd.export(os.path.join(basedir, 'sparse_points.ply'))
 
     pts_arr = np.array(pts_arr)
-    vis_arr = np.array(vis_arr)
-    print('Points', pts_arr.shape, 'Visibility', vis_arr.shape )
 
     poses = np.moveaxis(poses, -1, 0)
     poses = poses[perm]
@@ -252,16 +247,17 @@ def gen_poses(basedir, match_type, factors=None):
         files_had = []
     if not all([f in files_had for f in files_needed]):
         print( 'Need to run COLMAP' )
-        run_colmap(basedir, match_type)
+        run_pycolmap(basedir, match_type)
+        # run_colmap(basedir, match_type)
     else:
         print('Don\'t need to run COLMAP')
         
     print('Post-colmap')
     
-    poses, pts3d, perm = load_colmap_data(basedir)
+    poses, pts3d, perm, pose_idxs = load_colmap_data(basedir)
 
 
-    save_poses(basedir, poses, pts3d, perm)
+    save_poses(basedir, poses, pts3d, perm, pose_idxs)
     
     if factors is not None:
         print( 'Factors:', factors)
