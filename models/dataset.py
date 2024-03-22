@@ -4,6 +4,7 @@ import cv2 as cv
 import numpy as np
 import os
 from glob import glob
+from tqdm import tqdm
 from icecream import ic
 from scipy.spatial.transform import Rotation as Rot
 from scipy.spatial.transform import Slerp
@@ -75,6 +76,7 @@ class Dataset:
             self.pose_all.append(torch.from_numpy(pose).float())
 
         self.images = torch.from_numpy(self.images_np.astype(np.float32)).cpu()  # [n_images, H, W, 3]
+        self.preprocess_images()
         self.masks  = torch.from_numpy(self.masks_np.astype(np.float32)).cpu()   # [n_images, H, W, 3]
         self.intrinsics_all = torch.stack(self.intrinsics_all).to(self.device)   # [n_images, 4, 4]
         self.intrinsics_all_inv = torch.inverse(self.intrinsics_all)  # [n_images, 4, 4]
@@ -93,6 +95,45 @@ class Dataset:
         self.object_bbox_max = object_bbox_max[:3, 0]
 
         print('Load data: End')
+
+    def preprocess_images(self):
+        """
+        Undistort images according to lightneus 
+        """
+        num_imgs, rows, cols, channels = self.images.shape
+        row_idxs, col_idxs = np.indices((rows, cols))
+        pixel_coords = np.stack((row_idxs, col_idxs), axis=-1) # [H, W, 2] where each entry in first 2d is [row, col]
+
+        print("Undistorting images")
+        for i in tqdm(range(num_imgs)):
+            img = self.images[i].numpy()
+            depth_map = np.sqrt(np.sum(img, axis=2)) # Approximate depth as the pixel intensity
+            row_col_depth = np.dstack((pixel_coords, depth_map)).reshape(-1, 3)
+            g_t = 2.0 # Autogain unknown for ct1a, estimates from 1 to 3
+            gamma = 2.2 # generally a constant
+            k = 2.5 # estimate from lightneus precursor for cosine power for decay
+            Le = np.apply_along_axis( # Compute for every pixel
+                self.get_calibrated_photometric_endoscope_model, 
+                1, row_col_depth, 
+                k, g_t, gamma)
+            Le = Le.reshape((img.shape[0], img.shape[1]))
+            Le = np.repeat(Le[:, :, np.newaxis], 3, axis=2) # Repeat along every channel
+            img = np.power(np.power(img, gamma) / (g_t * Le), 1/gamma)
+            self.images[i] = torch.Tensor(img).to('cuda')
+
+    def light_spread_function(self, z, k):
+        return np.power(np.abs(np.cos(z)), k)
+
+    def get_calibrated_photometric_endoscope_model(self, row_col_depth, k, g_t, gamma):
+        r, c, z = row_col_depth
+        mu_prime = self.light_spread_function(z, k)
+        f_r_theta = 1/np.pi # Lambertian BRDF, might work better with value closer to 0 like 1/2pi
+        xc_to_pixel = np.linalg.norm(np.array([r, c, z])) # Find distance from center of image to pixel
+        theta = 2 * (np.arccos(np.linalg.norm(np.array([r, c])) / xc_to_pixel)) # Compute angle of incidence, and then find angle theta
+        xc_to_pixel += 1e-7 # to avoid divide by zero
+        L = (mu_prime / xc_to_pixel) * f_r_theta * np.cos(theta) * g_t
+        L  = np.power(np.abs(L), gamma) # TODO: might need to preserve sign
+        return L
 
     def gen_rays_at(self, img_idx, resolution_level=1):
         """

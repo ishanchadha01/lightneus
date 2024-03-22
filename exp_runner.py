@@ -129,6 +129,9 @@ class Runner:
             weight_max = render_out['weight_max']
             weight_sum = render_out['weight_sum']
 
+            # Postprocess image to be undistorted from lightneus
+            # true_rgb
+
             # Loss
             color_error = (color_fine - true_rgb) * mask
             color_fine_loss = F.l1_loss(color_error, torch.zeros_like(color_error), reduction='sum') / mask_sum
