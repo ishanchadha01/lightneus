@@ -76,7 +76,7 @@ class Dataset:
             self.pose_all.append(torch.from_numpy(pose).float())
 
         self.images = torch.from_numpy(self.images_np.astype(np.float32)).cpu()  # [n_images, H, W, 3]
-        self.preprocess_images()
+        self.preprocess_images_le2()
         self.masks  = torch.from_numpy(self.masks_np.astype(np.float32)).cpu()   # [n_images, H, W, 3]
         self.intrinsics_all = torch.stack(self.intrinsics_all).to(self.device)   # [n_images, 4, 4]
         self.intrinsics_all_inv = torch.inverse(self.intrinsics_all)  # [n_images, 4, 4]
@@ -96,9 +96,49 @@ class Dataset:
 
         print('Load data: End')
 
-    def preprocess_images(self):
+
+    def preprocess_images_le2(self):
         """
-        Undistort images according to lightneus 
+        Undistort images according to lightneus, second pass
+        """
+        print("Undistorting images")
+        num_imgs, rows, cols, channels = self.images.shape
+
+        #TODO: put below magic nums from calibration in conf
+        g= 2.0 # Autogain unknown for ct1a, estimates from 1 to 3
+        gamma = 2.2 # gamma correction, generally constant
+        k = 2.5 # decay power from emitted light
+        f = 767.45 # average of fx and fy, TODO compute differently in different directions
+        h = 1080
+        w = 1350
+        # (252,0) pixel coord varies between 160<alpha<170
+        p0 = np.array([252,0]) # point at corner of fov
+        pcenter = np.array([(h-1)/2, (w-1)/2])
+        centered_p0 = p0 - pcenter
+        fov = 165/2 # varies between 160 and 170 for this c3vd endoscope
+        alpha = fov/2
+        d = f * np.tan(alpha)
+        px_size = np.array([d*np.sin(alpha), d*np.cos(alpha)]) / centered_p0 # get pixel sizes, row/col correspond to y/x
+
+        # Compute alpha and then Le for every point based on pixel size
+        rows, cols = np.meshgrid(np.arange(w), np.arange(h))
+        row_dist = np.abs(rows - pcenter[0])
+        col_dist = np.abs(cols - pcenter[1])
+        dists = np.stack((row_dist, col_dist), axis=-1) * np.expand_dims(px_size, axis=(0,1))
+        dists = np.linalg.norm(dists, axis=2)
+        alpha = np.arctan2(dists, f)
+        Le = np.power(np.cos(alpha), k)
+        cv.imwrite("./Le.png", Le)
+        cv.imwrite("./le_img.png", self.images[0] / torch.Tensor(Le).unsqueeze(-1).detach().cpu())
+
+        # Compute normalized images
+        Le = torch.Tensor(Le).unsqueeze(-1).detach().cpu()
+        self.images = (torch.pow(self.images, gamma) / (Le * g))
+
+
+    def preprocess_images_le(self):
+        """
+        Undistort images according to lightneus and factor in emitted light
         """
         num_imgs, rows, cols, channels = self.images.shape
         row_idxs, col_idxs = np.indices((rows, cols))
